@@ -3,15 +3,16 @@ package main
 import (
 	"fmt"
 	logger "github.com/sirupsen/logrus"
-	"time"
+	"github.com/valeyard77/consul_host_discover/internal/netutils"
 	"os"
+	"time"
 )
 
 const (
-	ConsulSever = "app-consul:8500"
-	Token = "j+sZskbe21jYYzwrnJcsJM6Ee6uPD7kDe8PWViIRExM="
-	Datacenter = "ex"
-	DeregisterServiceTime = "48h"
+	ConsulSever            = "app-consul:8500"
+	Token                  = "j+sZskbe21jYYzwrnJcsJM6Ee6uPD7kDe8PWViIRExM="
+	Datacenter             = "ex"
+	DeregisterServiceTime  = "48h"
 	FailuresBeforeCritical = 3
 )
 
@@ -31,7 +32,7 @@ type consulHostSvc struct {
 			ConsulExporter  int `json:"consul_exporter"`
 			SslExporter     int `json:"ssl_exporter"`
 			RabbitMQ        int `json:"rabbitMQ"`
-			VictoriaMetrics        int `json:"victoriametrics"`
+			VictoriaMetrics int `json:"victoriametrics"`
 		} `json:"Exporters"`
 		RabbitMQ struct {
 			Port int `json:"Port"`
@@ -40,7 +41,7 @@ type consulHostSvc struct {
 }
 
 type hosts struct {
-	tcpPorts []int
+	tcpPorts  []int
 	httpPorts []int
 }
 
@@ -61,17 +62,17 @@ func init() {
 }
 
 func setConsulCheckParams(dns_zone map[string]string) *[]consulHostSvc {
-	ch:= make(chan map[string]bool, 4)
+	ch := make(chan map[string]bool, 4)
 	l := []consulHostSvc{}
 
 	/*
-	    6379 - redis
-		9100, 9200 - node_exporter
-		9256 - process_exporter
-		9219 - ssl_exporter
-		9107 - consul_exporter
-	    8428 - victoriametrics
-		15672 - rabbitMQ /api/metrics
+		    6379 - redis
+			9100, 9200 - node_exporter
+			9256 - process_exporter
+			9219 - ssl_exporter
+			9107 - consul_exporter
+		    8428 - victoriametrics
+			15672 - rabbitMQ /api/metrics
 	*/
 	hp := hosts{
 		tcpPorts:  []int{21, 22, 1883, 3306, 5432, 6379},
@@ -85,7 +86,7 @@ func setConsulCheckParams(dns_zone map[string]string) *[]consulHostSvc {
 	//dns_zone["mpwr-kt200-sc3.dev.hm.net"] = "192.168.1.200"
 
 	for hostname, ip := range dns_zone {
-		alive := pingHost(ip)
+		alive := netutils.Ping(ip)
 		if alive == true {
 			logger.Infof("Host %s/%s is alive \n", hostname, ip)
 			var hsvc consulHostSvc
@@ -93,8 +94,8 @@ func setConsulCheckParams(dns_zone map[string]string) *[]consulHostSvc {
 			hsvc.Svc.HOSTNAME = hostname
 			hsvc.Svc.IP = ip
 			for _, port := range hp.tcpPorts {
-				go checkTCPConnect(hostname, ip, port, ch)
-				st:= <- ch
+				go netutils.CheckTCPConnect(hostname, ip, port, ch)
+				st := <-ch
 				if st["tcp_check"] == true {
 					hsvc.Svc.TCPCheck.Ports = append(hsvc.Svc.TCPCheck.Ports, port)
 				}
@@ -102,14 +103,26 @@ func setConsulCheckParams(dns_zone map[string]string) *[]consulHostSvc {
 			}
 
 			for _, port := range hp.httpPorts {
-				go checkHTTPConnect(hostname, ip, port, "http", ch)
-				stmap:= <- ch
-				if stmap["http_result"] == true { hsvc.Svc.HTTP.Ports = append(hsvc.Svc.HTTP.Ports, port) }
-				if stmap["node_exporter"] == true { hsvc.Svc.Exporters[0].NodeExporter = port }
-				if stmap["consul_exporter"] == true { hsvc.Svc.Exporters[0].ConsulExporter = port }
-				if stmap["process_exporter"] == true { hsvc.Svc.Exporters[0].ProcessExporter = port }
-				if stmap["rabbitmq"] == true { hsvc.Svc.Exporters[0].RabbitMQ = port }
-				if stmap["victoriametrics"] == true { hsvc.Svc.Exporters[0].VictoriaMetrics = port }
+				go netutils.CheckHTTPConnect(hostname, ip, port, "http", ch)
+				stmap := <-ch
+				if stmap["http_result"] == true {
+					hsvc.Svc.HTTP.Ports = append(hsvc.Svc.HTTP.Ports, port)
+				}
+				if stmap["node_exporter"] == true {
+					hsvc.Svc.Exporters[0].NodeExporter = port
+				}
+				if stmap["consul_exporter"] == true {
+					hsvc.Svc.Exporters[0].ConsulExporter = port
+				}
+				if stmap["process_exporter"] == true {
+					hsvc.Svc.Exporters[0].ProcessExporter = port
+				}
+				if stmap["rabbitmq"] == true {
+					hsvc.Svc.Exporters[0].RabbitMQ = port
+				}
+				if stmap["victoriametrics"] == true {
+					hsvc.Svc.Exporters[0].VictoriaMetrics = port
+				}
 			}
 			l = append(l, hsvc)
 		} else {
@@ -121,18 +134,18 @@ func setConsulCheckParams(dns_zone map[string]string) *[]consulHostSvc {
 }
 
 func main() {
-	start:= time.Now().Unix()
+	start := time.Now().Unix()
 	fmt.Println("Get zone info from hm.net")
-	t:= getDNSZoneInfo("hm.net")
+	t := netutils.GetDNSZoneInfo("hm.net")
 	fmt.Printf("Recieved %d hosts from dns, let's deduplicate data in dns zone hm.net\n", len(t))
-	dns_zone:= removeDuplicateIP(t)
+	dns_zone := netutils.RemoveDuplicateIP(t)
 	fmt.Printf("Deduplicate complete, now is %d hosts in dns zone\n", len(dns_zone))
 	fmt.Println("Create service params for consul from hosts")
 
-	cp:= setConsulCheckParams(dns_zone)
+	cp := setConsulCheckParams(dns_zone)
 	setConsulSVC(ConsulSever, Token, Datacenter, cp)
 
-	stop:= time.Now().Unix()
+	stop := time.Now().Unix()
 	//fmt.Printf("%d | %d\n", start, stop)
 	fmt.Printf("Execution time: %d seconds", stop-start)
 }
