@@ -1,11 +1,35 @@
 package netutils
 
 import (
+	"fmt"
 	logger "github.com/sirupsen/logrus"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
 )
+
+func ExpandCIDR(subnet string) ([]string, error) {
+	ip, ipnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse cidr format for %s, %w", subnet, err)
+	}
+	var ips []string
+	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); inc(ip) {
+		ips = append(ips, ip.String())
+	}
+	// remove network address and broadcast address
+	return ips[1 : len(ips)-1], nil
+}
+
+func inc(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
 
 func getServiceName(proto string, port int) (serviceName string, err error) {
 	//if port eq one of then set return

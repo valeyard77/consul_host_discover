@@ -6,6 +6,7 @@ require (
 	github.com/go-ping/ping v1.2.0
 	github.com/hashicorp/consul/api v1.30.0
 	github.com/sirupsen/logrus v1.9.3
+	github.com/spf13/pflag v1.0.5
 )
 
 require (
