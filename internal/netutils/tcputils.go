@@ -30,6 +30,41 @@ func Ping(address string) bool {
 	return true
 }
 
+func PingAlive(iplist []string, threads int) []string {
+	tokens := make(chan struct{}, threads)
+	monitoringhostsvc := make(chan string)
+	var monitoringHosts []string
+
+	for _, ip := range iplist {
+		go func(ip string, monitoringhostsvc chan<- string) {
+			tokens <- struct{}{}
+			if Ping(ip) {
+				monitoringhostsvc <- ip
+			} else {
+				monitoringhostsvc <- ""
+			}
+			<-tokens
+
+		}(ip, monitoringhostsvc)
+	}
+
+	var hosts []string
+	for _, _ = range iplist {
+		select {
+		case m := <-monitoringhostsvc:
+			hosts = append(hosts, m)
+		}
+	}
+
+	for _, host := range hosts {
+		if host != "" {
+			monitoringHosts = append(monitoringHosts, host)
+		}
+	}
+
+	return monitoringHosts
+}
+
 // CheckTCPConnect check tcp connection, return status: true/false,
 func CheckTCPConnect(hostname, address string, port int, ch chan<- map[string]bool) (status bool) {
 	res := make(map[string]bool, 1)
